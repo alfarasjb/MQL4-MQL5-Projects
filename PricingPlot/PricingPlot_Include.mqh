@@ -1,106 +1,158 @@
-//+------------------------------------------------------------------+
-//|                                          PricingPlot_Include.mqh |
-//|                             Copyright 2023, Jay Benedict Alfaras |
-//|                                             https://www.mql5.com |
-//+------------------------------------------------------------------+
+
 #property copyright "Copyright 2023, Jay Benedict Alfaras"
-#property link      "https://www.mql5.com"
 #property strict
+
 
 
 #include <B63/CObjects.mqh>
 #include <B63/Generic.mqh>
 
+
+// INPUTS //
 input ENUM_TIMEFRAMES         InpPeriods = PERIOD_D1; // Reference Period
 input color                   InpLineCol = clrRed; // Line Color
+input ENUM_LINE_STYLE         InpLineStyle = STYLE_SOLID; // Line Style
 input color                   InpFontCol = clrWhite; // Font Color
-// SCREEN ADJUSTMENTS // 
+
+// SCREEN ADJUSTMENTS - For scaling on different monitors // 
 int screen_dpi = TerminalInfoInteger(TERMINAL_SCREEN_DPI);
 int scale_factor = (screen_dpi * 100) / 96;
 
+// OBJECT CONSTANTS // 
 const int defX                = (5);
 const int defY                = (190);
 const string font             = "Segoe UI Semibold";
 const string fontBold         = "Segoe UI Bold";
 
-CObjects obj(defX, defY, 10, scale_factor);
+// STRUCT //
 
+// Storing Symbol Info - Called on init //
 struct SInfo{
    string symbol;
    int digits;
    
-   SInfo(){
+   void initInfo(){
       symbol = Sym();
       digits = digits();
    }
+   
+   SInfo(){ initInfo(); }
 };
 
-
-struct SPricing{
-   double premium;
-   double discount;
-   double equilibrium;
+// Storing Arrays and Data //
+struct SData{
+   double data[];
+   double ohlc[4];
+   double ratios [6];
    
-   void initPrice(double high, double low, double mid){
-      premium = high;
-      discount = low;
-      equilibrium = mid;
+   void fillArray(double &src[], double &dst[]){
+      ArrayResize(dst, ArraySize(src));
+      ArrayCopy(dst, src);
    }
    
-   SPricing(){
-      initPrice(0, 0, 0);
+   void initOHLC(){
+      double open = iOpen(Sym(), InpPeriods, 1);
+      double high = iHigh(Sym(), InpPeriods, 1);
+      double low = iLow(Sym(), InpPeriods, 1);
+      double close = iClose(Sym(), InpPeriods, 1);
+      ohlc[0] = open;
+      ohlc[1] = high;
+      ohlc[2] = low;
+      ohlc[3] = close;
    }
    
+   SData(){
+      double ratio []= {1, 0.618, 0.5, 0.382, 0.236, 0}; // Standard Fibonacci Retracement levels
+      initOHLC();
+      fillArray(ratio, ratios);
+   }
 };
 
-SPricing pricing;
+// DECLARATION // 
+SData sdata;
 SInfo info;
+CObjects obj(defX, defY, 10, scale_factor);
 
+
+// Function Call on initializing EA //
 int OnInit()
   {
+  ObjectsDeleteAll(0, 0, -1);
+
+   info.initInfo();
    initPrice();
    draw();
 
    return(INIT_SUCCEEDED);
   }
+  
+// Function Call on closing EA //
 void OnDeinit(const int reason)
   {
   ObjectsDeleteAll(0, 0, -1);
 
   }
+  
+// Function call on every candle tick // 
 void OnTick()
   {
-   if (IsNewCandle()){ draw(); }
+  // Updates drawing on new candle
+   if (IsNewCandle()) { draw(); } 
   }
-//+------------------------------------------------------------------+
 
+
+// MAIN FUNCTIONS // 
 
 void initPrice(){
-   double high = iHigh(Sym(), InpPeriods, 1);
-   double low = iLow(Sym(), InpPeriods, 1);
-   double mid = (high + low) / 2;
-   pricing.initPrice(high, low, mid);
+   sdata.initOHLC();
+   
+   
+   // assigning array contents to variables for readability
+   double open = sdata.ohlc[0];
+   double high = sdata.ohlc[1];
+   double low = sdata.ohlc[2];
+   double close = sdata.ohlc[3];
+   
+   // LONG: SWL - (diff * ratio)
+   // SHORT: SWH - (diff * ratio)
+   
+   double bias = close > open ? 1 : -1;
+   double referencePrice = close > open ? low : high;
+   double data [] = {}; // array to send to struct variable 
+   
+   // Resizing main data array to fit ratios for scaling future features. 
+   ArrayResize(data, ArraySize(sdata.ratios));
+   
+   
+   // populating data array
+   for(int i = 0; i < ArraySize(data); i++){
+      double ratio = (high - low) * sdata.ratios[i];
+      double level = referencePrice + (ratio * bias);
+      data[i] = level;
+   }
+   sdata.fillArray(data, sdata.data); // sdata.data will be called later for drawing objects
 }
-
 
 void draw(){
    datetime t_start = startTime();
    datetime t_end = endTime();
-   string objects [] = {"HighLine", "LowLine", "MidLine","HighText", "LowText", "MidText"};
    int fontSize = 8;
-   obj.CTrend(objects[0], pricing.premium, t_start, t_end, STYLE_DASH, InpLineCol);
-   obj.CTrend(objects[1], pricing.discount, t_start, t_end, STYLE_DASH, InpLineCol);
-   obj.CTrend(objects[2], pricing.equilibrium, t_start, t_end, STYLE_SOLID, InpLineCol);
-   obj.CText(objects[3],"P - "+ normDouble(pricing.premium), t_end, pricing.premium, fontSize, InpFontCol);
-   obj.CText(objects[4],"D - " + normDouble(pricing.discount), t_end, pricing.discount, fontSize, InpFontCol);
-   obj.CText(objects[5],"N - " + normDouble(pricing.equilibrium), t_end, pricing.equilibrium, fontSize, InpFontCol);
    
+   // creating objects
+   for (int i = 0; i < ArraySize(sdata.data) ; i++ ){
+      // creates a pair: text and trendline for each price level
+      // casting to avoid type warnings
+      double ratio = NormalizeDouble((sdata.ratios[i] * 100), 2);
+      double price = sdata.data[i];
+      obj.CText(string(ratio)+"label", (string)ratio + " - " + normDouble(price), t_end, price, fontSize, InpFontCol);
+      obj.CTrend(string(ratio) + "tline", price, t_start, t_end, InpLineStyle, InpLineCol);
+   }
 }
 
 
+// WRAPPER FUNCTIONS //
 int digits() { return (int)SymbolInfoInteger(Sym(), SYMBOL_DIGITS); }
 string Sym(){  return Symbol(); }
 datetime startTime(){ return iTime(info.symbol, InpPeriods, 0); }
 datetime endTime() { return TimeCurrent(); }
-
 string normDouble(double price){ return (string)NormalizeDouble(price, info.digits); }
