@@ -116,8 +116,8 @@ void initPrice(){
    // LONG: SWL - (diff * ratio)
    // SHORT: SWH - (diff * ratio)
    
-   double bias = close > open ? 1 : -1;
-   double referencePrice = close > open ? low : high;
+   double bias = close < open ? 1 : -1;
+   double referencePrice = close < open ? low : high;
    double data [] = {}; // array to send to struct variable 
    
    // Resizing main data array to fit ratios for scaling future features. 
@@ -134,7 +134,9 @@ void initPrice(){
 }
 
 void draw(){
-   datetime t_start = startTime();
+   initPrice();
+   
+   datetime t_start = startTime(0);
    datetime t_end = endTime();
    int fontSize = 8;
    
@@ -147,12 +149,19 @@ void draw(){
       obj.CText(string(ratio)+"label", (string)ratio + " - " + normDouble(price), t_end, price, fontSize, InpFontCol);
       obj.CTrend(string(ratio) + "tline", price, t_start, t_end, InpLineStyle, InpLineCol);
    }
+   
+   // build swing high, swing low, trendline
+   double reference = sdata.ohlc[3] > sdata.ohlc[0] ? sdata.ohlc[2] : sdata.ohlc[1];
+   double target = sdata.ohlc[3] > sdata.ohlc[0] ? sdata.ohlc[1] : sdata.ohlc[2];
+   obj.CTrend("SWL", sdata.ohlc[2], startTime(1), t_end, InpLineStyle, InpLineCol, 2);
+   obj.CTrend("SWH", sdata.ohlc[1], startTime(1), t_end, InpLineStyle, InpLineCol, 2);
+   obj.CTrend("TLine", reference, target, startTime(1),t_end, STYLE_DOT, InpLineCol, 1, True, False, False);
 }
 
 
 // WRAPPER FUNCTIONS //
 int digits() { return (int)SymbolInfoInteger(Sym(), SYMBOL_DIGITS); }
 string Sym(){  return Symbol(); }
-datetime startTime(){ return iTime(info.symbol, InpPeriods, 0); }
+datetime startTime(int shift){ return iTime(info.symbol, InpPeriods, shift); }
 datetime endTime() { return TimeCurrent(); }
 string normDouble(double price){ return (string)NormalizeDouble(price, info.digits); }
